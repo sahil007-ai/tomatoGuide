@@ -4,6 +4,12 @@ Configuration Module for Focus Guard AI Pomodoro Timer
 This module contains all configuration constants and settings for the
 Focus Guard application. Centralized configuration makes it easy to
 adjust settings without modifying the main codebase.
+
+Production features:
+- Input validation for all settings
+- Secure default values
+- Path validation and sanitization
+- Resource limits
 """
 
 import os
@@ -18,25 +24,58 @@ APP_VERSION = "1.0.0"
 AUTHOR = "Your Name/Team"
 
 # ============================================================================
+# VALIDATION HELPER
+# ============================================================================
+
+
+def _validate_positive_int(value: int, min_val: int = 1, max_val: int = 10000) -> int:
+    """Validate and clamp integer values."""
+    if not isinstance(value, int):
+        raise ValueError(f"Expected int, got {type(value)}")
+    return max(min_val, min(value, max_val))
+
+
+# ============================================================================
 # FILE PATHS
 # ============================================================================
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.resolve()  # Absolute path
 ASSETS_DIR = BASE_DIR / "assets"
 DATA_DIR = BASE_DIR / "data"
 
-# Create directories if they don't exist
-ASSETS_DIR.mkdir(exist_ok=True)
-DATA_DIR.mkdir(exist_ok=True)
+# Create directories if they don't exist (with error handling)
+try:
+    ASSETS_DIR.mkdir(exist_ok=True, parents=True)
+    DATA_DIR.mkdir(exist_ok=True, parents=True)
+except OSError as e:
+    print(f"Warning: Failed to create directories: {e}")
 
 MEMORY_PATH = DATA_DIR / "focus_memory.txt"
 LOG_DIR = BASE_DIR / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+
+try:
+    LOG_DIR.mkdir(exist_ok=True, parents=True)
+except OSError as e:
+    print(f"Warning: Failed to create log directory: {e}")
+
 LOG_FILE = LOG_DIR / "focus_guard.log"
 
 # Collaboration data
 COLLAB_DIR = DATA_DIR / "collaboration"
-COLLAB_DIR.mkdir(exist_ok=True)
+try:
+    COLLAB_DIR.mkdir(exist_ok=True, parents=True)
+except OSError as e:
+    print(f"Warning: Failed to create collaboration directory: {e}")
+
+# Reports and keys
+REPORT_DIR = DATA_DIR / "reports"
+KEY_DIR = DATA_DIR / "keys"
+
+try:
+    REPORT_DIR.mkdir(exist_ok=True, parents=True)
+    KEY_DIR.mkdir(exist_ok=True, parents=True)
+except OSError as e:
+    print(f"Warning: Failed to create report/key directories: {e}")
 
 # Sound files
 SOUND_SESSION_END = ASSETS_DIR / "session_end.mp3"

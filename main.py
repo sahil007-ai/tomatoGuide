@@ -5,13 +5,27 @@ import time
 import pygame
 import cv2
 import mediapipe as mp
+from tkinter import filedialog
 from PIL import Image
 import math
 from focus_detector import FocusDetector
 from brain import AdaptiveTimer
 from collaboration import CollaborationSession
-from config import COLLAB_DIR, COLLAB_CODE_LENGTH, COLLAB_POLL_INTERVAL_MS
+from config import (
+    COLLAB_DIR,
+    COLLAB_CODE_LENGTH,
+    COLLAB_POLL_INTERVAL_MS,
+    DATA_DIR,
+)
 from logger import logger as app_logger
+
+try:
+    from report_manager import TeacherReportManager
+
+    REPORTS_AVAILABLE = True
+except Exception:
+    TeacherReportManager = None
+    REPORTS_AVAILABLE = False
 
 WORK_MIN = 25
 SHORT_BREAK_MIN = 5
@@ -55,6 +69,12 @@ class PomodoroTimer:
         self.current_session_distractions = 0
         self.last_session_distractions = 0
         self.last_penalty_time = 0.0
+        self.total_focus_seconds = 0
+        self.total_distractions = 0
+        self.completed_sessions = 0
+        self.total_focus_seconds = 0
+        self.total_distractions = 0
+        self.completed_sessions = 0
         self.ai_brain = AdaptiveTimer(
             current_optimal_mins=WORK_MIN, memory_path=MEMORY_PATH
         )
@@ -237,6 +257,11 @@ class PomodoroTimer:
         self.collab_polling_active = False
         self.accountability_enabled = ctk.BooleanVar(value=False)
 
+        self.report_manager = None
+        self.reports_enabled = ctk.BooleanVar(value=False)
+        if not REPORTS_AVAILABLE:
+            app_logger.warning("Teacher reports unavailable: cryptography not loaded")
+
         accountability_frame = ctk.CTkFrame(right_frame)
         accountability_frame.pack(pady=8, fill="x", padx=10)
 
@@ -326,6 +351,52 @@ class PomodoroTimer:
             join_button,
         ]
         self.set_accountability_enabled(self.accountability_enabled.get())
+
+        reports_frame = ctk.CTkFrame(right_frame)
+        reports_frame.pack(pady=8, fill="x", padx=10)
+
+        reports_label = ctk.CTkLabel(
+            reports_frame,
+            text="Teacher Reports",
+            font=("Helvetica", 12, "bold"),
+        )
+        reports_label.pack(anchor="w", pady=(0, 5))
+
+        reports_toggle = ctk.CTkCheckBox(
+            reports_frame,
+            text="Enable teacher reports",
+            variable=self.reports_enabled,
+            command=self.on_reports_toggle,
+        )
+        reports_toggle.pack(anchor="w", pady=(0, 5))
+
+        teacher_key_button = ctk.CTkButton(
+            reports_frame,
+            text="Load teacher key",
+            command=self.load_teacher_key,
+        )
+        teacher_key_button.pack(fill="x", pady=(0, 5))
+
+        generate_report_button = ctk.CTkButton(
+            reports_frame,
+            text="Generate report",
+            command=self.generate_teacher_report,
+        )
+        generate_report_button.pack(fill="x", pady=(0, 5))
+
+        self.report_status_label = ctk.CTkLabel(
+            reports_frame,
+            text="Teacher reports: Disabled",
+            font=("Helvetica", 11),
+            text_color="#CCCCCC",
+        )
+        self.report_status_label.pack(anchor="w")
+
+        self.report_controls = [
+            teacher_key_button,
+            generate_report_button,
+        ]
+        self.set_reports_enabled(self.reports_enabled.get())
 
         control_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
         control_frame.pack(pady=10)
@@ -608,6 +679,82 @@ class PomodoroTimer:
             self.partner_goals_display.insert("end", "No goals shared yet.")
         self.partner_goals_display.configure(state="disabled")
 
+    def on_reports_toggle(self):
+        self.set_reports_enabled(self.reports_enabled.get())
+
+    def set_reports_enabled(self, enabled: bool):
+        if not REPORTS_AVAILABLE:
+            self.reports_enabled.set(False)
+            enabled = False
+            self.update_report_status("Teacher reports: Unavailable", state="error")
+        elif enabled:
+            if self.report_manager is None:
+                self.report_manager = TeacherReportManager(app_logger, DATA_DIR)
+            self.update_report_status("Teacher reports: Enabled")
+        else:
+            self.update_report_status("Teacher reports: Disabled")
+
+        for control in self.report_controls:
+            control.configure(state="normal" if enabled else "disabled")
+
+    def update_report_status(self, text, state="neutral"):
+        if state == "error":
+            color = COLOR_WARN
+        elif state == "connected":
+            color = "#00FF00"
+        else:
+            color = "#CCCCCC"
+        self.report_status_label.configure(text=text, text_color=color)
+
+    def load_teacher_key(self):
+        if not self.reports_enabled.get():
+            return
+        if self.report_manager is None:
+            self.update_report_status("Teacher reports: Unavailable", state="error")
+            return
+
+        key_path = filedialog.askopenfilename(
+            title="Select Teacher Public Key",
+            filetypes=[("PEM files", "*.pem"), ("All files", "*.*")],
+        )
+        if not key_path:
+            return
+        try:
+            self.report_manager.load_teacher_public_key_from_file(key_path)
+            self.update_report_status("Teacher key loaded", state="connected")
+        except Exception as exc:
+            app_logger.warning("Failed to load teacher key: %s", exc)
+            self.update_report_status("Teacher key load failed", state="error")
+
+    def build_report_payload(self):
+        return {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "sessions_completed": self.completed_sessions,
+            "total_focus_minutes": int(self.total_focus_seconds / 60),
+            "total_distractions": self.total_distractions,
+            "last_session_distractions": self.last_session_distractions,
+        }
+
+    def generate_teacher_report(self):
+        if not self.reports_enabled.get():
+            return
+        if self.report_manager is None:
+            self.update_report_status("Teacher reports: Unavailable", state="error")
+            return
+        if not self.report_manager.teacher_key_loaded():
+            self.update_report_status("Teacher key required", state="error")
+            return
+
+        payload = self.build_report_payload()
+        try:
+            report_path = self.report_manager.generate_report(payload)
+            self.update_report_status(
+                f"Report generated: {report_path.name}", state="connected"
+            )
+        except Exception as exc:
+            app_logger.warning("Report generation failed: %s", exc)
+            self.update_report_status("Report generation failed", state="error")
+
     def update_collab_status(self, text, state="neutral"):
         if state == "connected":
             color = "#00FF00"
@@ -791,6 +938,8 @@ class PomodoroTimer:
             if self.current_session_type == "Work":
                 self.stop_camera()
                 self.last_session_distractions = self.current_session_distractions
+                self.completed_sessions += 1
+                self.total_focus_seconds += self.work_duration
                 next_focus_time = self.ai_brain.calculate_next_session(
                     self.current_session_distractions
                 )
@@ -920,6 +1069,7 @@ class PomodoroTimer:
                         now = time.time()
                         if now - self.last_penalty_time > 10:
                             self.current_session_distractions += 1
+                            self.total_distractions += 1
                             self.last_penalty_time = now
                             self.current_distractions_label.configure(
                                 text=(
@@ -979,18 +1129,89 @@ class PomodoroTimer:
         self.cap = None
 
     def on_closing(self):
+        \"\"\"Cleanup resources on application exit.\"\"\"
         print("Closing app...")
         self.is_running = False
-        self.stop_camera()
-        self.stop_collaboration()
-        self.root.destroy()
+        
+        # Stop camera with error handling
+        try:
+            self.stop_camera()
+        except Exception as exc:
+            app_logger.warning("Error stopping camera: %s", exc)
+        
+        # Stop collaboration with error handling
+        try:
+            self.stop_collaboration()
+        except Exception as exc:
+            app_logger.warning("Error stopping collaboration: %s", exc)
+        
+        # Cleanup pygame mixer
+        if self.sound_enabled:
+            try:
+                pygame.mixer.quit()
+            except Exception as exc:
+                app_logger.warning("Error stopping audio: %s", exc)
+        
+        # Destroy window
+        try:
+            self.root.destroy()
+        except Exception as exc:
+            app_logger.error("Error destroying window: %s", exc)
 
 
-if __name__ == "__main__":
-    ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("blue")
+def validate_production_readiness():
+    \"\"\"Validate that the application is ready for production use.\"\"\"
+    issues = []
+    
+    # Check critical directories exist
+    if not DATA_DIR.exists():
+        issues.append(f"Data directory missing: {DATA_DIR}\")
+    if not COLLAB_DIR.exists():
+        issues.append(f"Collaboration directory missing: {COLLAB_DIR}\")
+    
+    # Check asset files exist (optional, warn only)
+    if not Path(SOUND_SESSION_END).exists():
+        app_logger.warning(\"Sound file missing: %s\", SOUND_SESSION_END)
+    if not Path(SOUND_FOCUS_ALERT).exists():
+        app_logger.warning(\"Sound file missing: %s\", SOUND_FOCUS_ALERT)
+    
+    # Check write permissions
+    try:
+        test_file = DATA_DIR / \".write_test\"
+        test_file.write_text(\"test\")
+        test_file.unlink()
+    except Exception as exc:
+        issues.append(f\"Data directory not writable: {exc}\")
+    
+    if issues:
+        app_logger.error(\"Production readiness check failed:\")
+        for issue in issues:
+            app_logger.error(\"  - %s\", issue)
+        print(\"\\nWARNING: Production readiness check failed!\")
+        for issue in issues:
+            print(f\"  - {issue}\")
+        print(\"\\nContinuing anyway...\\n\")
+    else:
+        app_logger.info(\"Production readiness check passed\")
+
+
+if __name__ == \"__main__\":
+    # Validate production readiness
+    validate_production_readiness()
+    
+    ctk.set_appearance_mode(\"dark\")
+    ctk.set_default_color_theme(\"blue\")
 
     root = ctk.CTk()
     app = PomodoroTimer(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop()
+    root.protocol(\"WM_DELETE_WINDOW\", app.on_closing)
+    
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        app_logger.info(\"Application interrupted by user\")
+        app.on_closing()
+    except Exception as exc:
+        app_logger.error(\"Unexpected error in main loop: %s\", exc)
+        app.on_closing()
+        raise
