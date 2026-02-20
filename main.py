@@ -1129,7 +1129,7 @@ class PomodoroTimer:
         self.cap = None
 
     def on_closing(self):
-        \"\"\"Cleanup resources on application exit.\"\"\"
+        """Cleanup resources on application exit."""
         print("Closing app...")
         self.is_running = False
         
@@ -1160,58 +1160,58 @@ class PomodoroTimer:
 
 
 def validate_production_readiness():
-    \"\"\"Validate that the application is ready for production use.\"\"\"
+    """Validate that the application is ready for production use."""
     issues = []
     
     # Check critical directories exist
     if not DATA_DIR.exists():
-        issues.append(f"Data directory missing: {DATA_DIR}\")
+        issues.append(f"Data directory missing: {DATA_DIR}")
     if not COLLAB_DIR.exists():
-        issues.append(f"Collaboration directory missing: {COLLAB_DIR}\")
+        issues.append(f"Collaboration directory missing: {COLLAB_DIR}")
     
     # Check asset files exist (optional, warn only)
     if not Path(SOUND_SESSION_END).exists():
-        app_logger.warning(\"Sound file missing: %s\", SOUND_SESSION_END)
+        app_logger.warning("Sound file missing: %s", SOUND_SESSION_END)
     if not Path(SOUND_FOCUS_ALERT).exists():
-        app_logger.warning(\"Sound file missing: %s\", SOUND_FOCUS_ALERT)
+        app_logger.warning("Sound file missing: %s", SOUND_FOCUS_ALERT)
     
     # Check write permissions
     try:
-        test_file = DATA_DIR / \".write_test\"
-        test_file.write_text(\"test\")
+        test_file = DATA_DIR / ".write_test"
+        test_file.write_text("test")
         test_file.unlink()
     except Exception as exc:
-        issues.append(f\"Data directory not writable: {exc}\")
+        issues.append(f"Data directory not writable: {exc}")
     
     if issues:
-        app_logger.error(\"Production readiness check failed:\")
+        app_logger.error("Production readiness check failed:")
         for issue in issues:
-            app_logger.error(\"  - %s\", issue)
-        print(\"\\nWARNING: Production readiness check failed!\")
+            app_logger.error("  - %s", issue)
+        print("\nWARNING: Production readiness check failed!")
         for issue in issues:
-            print(f\"  - {issue}\")
-        print(\"\\nContinuing anyway...\\n\")
+            print(f"  - {issue}")
+        print("\nContinuing anyway...\n")
     else:
-        app_logger.info(\"Production readiness check passed\")
+        app_logger.info("Production readiness check passed")
 
 
-if __name__ == \"__main__\":
+if __name__ == "__main__":
     # Validate production readiness
     validate_production_readiness()
     
-    ctk.set_appearance_mode(\"dark\")
-    ctk.set_default_color_theme(\"blue\")
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
 
     root = ctk.CTk()
     app = PomodoroTimer(root)
-    root.protocol(\"WM_DELETE_WINDOW\", app.on_closing)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
     
     try:
         root.mainloop()
     except KeyboardInterrupt:
-        app_logger.info(\"Application interrupted by user\")
+        app_logger.info("Application interrupted by user")
         app.on_closing()
     except Exception as exc:
-        app_logger.error(\"Unexpected error in main loop: %s\", exc)
+        app_logger.error("Unexpected error in main loop: %s", exc)
         app.on_closing()
         raise
