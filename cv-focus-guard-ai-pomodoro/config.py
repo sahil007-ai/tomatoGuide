@@ -21,7 +21,7 @@ from pathlib import Path
 
 APP_NAME = "Focus Guard"
 APP_VERSION = "1.0.0"
-AUTHOR = "Your Name/Team"
+AUTHOR = "Your Name/ Team"
 
 # ============================================================================
 # VALIDATION HELPER
@@ -60,12 +60,28 @@ except OSError as e:
 
 LOG_FILE = LOG_DIR / "focus_guard.log"
 
-# Collaboration data
-COLLAB_DIR = DATA_DIR / "collaboration"
+# ============================================================================
+# COLLABORATION SETTINGS (Google Drive Auto-Detection)
+# ============================================================================
+
+# Try to use Google Drive shared folder for collaboration
+# Falls back to local folder if Google Drive not found
 try:
-    COLLAB_DIR.mkdir(exist_ok=True, parents=True)
-except OSError as e:
-    print(f"Warning: Failed to create collaboration directory: {e}")
+    from gdrive_helper import get_collaboration_folder
+
+    COLLAB_DIR = get_collaboration_folder()
+    if "Google Drive" in str(COLLAB_DIR):
+        print(f"✓ Using Google Drive collaboration folder: {COLLAB_DIR}")
+    else:
+        print(f"⚠ Google Drive not found. Using local folder: {COLLAB_DIR}")
+except Exception as e:
+    # Fallback to local folder if helper fails
+    print(f"Warning: Could not auto-detect Google Drive: {e}")
+    COLLAB_DIR = DATA_DIR / "collaboration"
+    try:
+        COLLAB_DIR.mkdir(exist_ok=True, parents=True)
+    except OSError as e:
+        print(f"Warning: Failed to create collaboration directory: {e}")
 
 # Reports and keys
 REPORT_DIR = DATA_DIR / "reports"

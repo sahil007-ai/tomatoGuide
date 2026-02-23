@@ -8,6 +8,7 @@ import mediapipe as mp
 from tkinter import filedialog
 from PIL import Image
 import math
+from pathlib import Path
 from focus_detector import FocusDetector
 from brain import AdaptiveTimer
 from collaboration import CollaborationSession
@@ -1132,26 +1133,26 @@ class PomodoroTimer:
         """Cleanup resources on application exit."""
         print("Closing app...")
         self.is_running = False
-        
+
         # Stop camera with error handling
         try:
             self.stop_camera()
         except Exception as exc:
             app_logger.warning("Error stopping camera: %s", exc)
-        
+
         # Stop collaboration with error handling
         try:
             self.stop_collaboration()
         except Exception as exc:
             app_logger.warning("Error stopping collaboration: %s", exc)
-        
+
         # Cleanup pygame mixer
         if self.sound_enabled:
             try:
                 pygame.mixer.quit()
             except Exception as exc:
                 app_logger.warning("Error stopping audio: %s", exc)
-        
+
         # Destroy window
         try:
             self.root.destroy()
@@ -1162,19 +1163,19 @@ class PomodoroTimer:
 def validate_production_readiness():
     """Validate that the application is ready for production use."""
     issues = []
-    
+
     # Check critical directories exist
     if not DATA_DIR.exists():
         issues.append(f"Data directory missing: {DATA_DIR}")
     if not COLLAB_DIR.exists():
         issues.append(f"Collaboration directory missing: {COLLAB_DIR}")
-    
+
     # Check asset files exist (optional, warn only)
     if not Path(SOUND_SESSION_END).exists():
         app_logger.warning("Sound file missing: %s", SOUND_SESSION_END)
     if not Path(SOUND_FOCUS_ALERT).exists():
         app_logger.warning("Sound file missing: %s", SOUND_FOCUS_ALERT)
-    
+
     # Check write permissions
     try:
         test_file = DATA_DIR / ".write_test"
@@ -1182,7 +1183,7 @@ def validate_production_readiness():
         test_file.unlink()
     except Exception as exc:
         issues.append(f"Data directory not writable: {exc}")
-    
+
     if issues:
         app_logger.error("Production readiness check failed:")
         for issue in issues:
@@ -1198,14 +1199,14 @@ def validate_production_readiness():
 if __name__ == "__main__":
     # Validate production readiness
     validate_production_readiness()
-    
+
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
 
     root = ctk.CTk()
     app = PomodoroTimer(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    
+
     try:
         root.mainloop()
     except KeyboardInterrupt:

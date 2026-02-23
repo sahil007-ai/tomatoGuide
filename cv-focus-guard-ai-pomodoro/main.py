@@ -278,6 +278,27 @@ class PomodoroTimer:
         )
         accountability_label.pack(anchor="w", pady=(0, 5))
 
+        # Show Google Drive status
+        from gdrive_helper import find_google_drive_folder
+
+        gdrive_found = find_google_drive_folder() is not None
+        if gdrive_found:
+            drive_status_text = "✓ Using Google Drive (works anywhere!)"
+            drive_status_color = "#00AA00"
+        else:
+            drive_status_text = (
+                "⚠ Using local folder (setup Google Drive for remote collab)"
+            )
+            drive_status_color = "#FFA500"
+
+        self.drive_status_label = ctk.CTkLabel(
+            accountability_frame,
+            text=drive_status_text,
+            font=("Helvetica", 10),
+            text_color=drive_status_color,
+        )
+        self.drive_status_label.pack(anchor="w", pady=(0, 8))
+
         accountability_toggle = ctk.CTkCheckBox(
             accountability_frame,
             text="Enable accountability",
