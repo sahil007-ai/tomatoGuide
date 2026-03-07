@@ -219,6 +219,10 @@ class ConfigTests(unittest.TestCase):
         self.assertGreater(config.COLLAB_CODE_LENGTH, 0)
         self.assertIsInstance(config.COLLAB_POLL_INTERVAL_MS, int)
         self.assertGreater(config.COLLAB_POLL_INTERVAL_MS, 0)
+        self.assertIsInstance(config.BLUETOOTH_RFCOMM_CHANNEL, int)
+        self.assertGreater(config.BLUETOOTH_RFCOMM_CHANNEL, 0)
+        self.assertIsInstance(config.BLUETOOTH_POLL_INTERVAL_MS, int)
+        self.assertGreater(config.BLUETOOTH_POLL_INTERVAL_MS, 0)
 
 
 # ============================================================================

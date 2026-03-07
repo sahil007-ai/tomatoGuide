@@ -13,12 +13,22 @@ from focus_detector import FocusDetector
 from brain import AdaptiveTimer
 from collaboration import CollaborationSession
 from config import (
+    BLUETOOTH_RFCOMM_CHANNEL,
     COLLAB_DIR,
     COLLAB_CODE_LENGTH,
+    BLUETOOTH_POLL_INTERVAL_MS,
     COLLAB_POLL_INTERVAL_MS,
     DATA_DIR,
 )
 from logger import logger as app_logger
+
+try:
+    from bluetooth_accountability import BluetoothAccountabilityBridge
+
+    BLUETOOTH_MODULE_AVAILABLE = True
+except Exception:
+    BluetoothAccountabilityBridge = None
+    BLUETOOTH_MODULE_AVAILABLE = False
 
 try:
     from report_manager import TeacherReportManager
@@ -98,21 +108,30 @@ class PomodoroTimer:
             app_logger.warning("Audio init failed: %s", exc)
         self.cap = None
         self.camera_active = False
-        self.mp_face_mesh = mp.solutions.face_mesh
+        self.mp_face_mesh = None
         self.face_mesh = None
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.drawing_spec = self.mp_drawing.DrawingSpec(
-            thickness=1, circle_radius=1, color=(0, 255, 0)
-        )
-        try:
-            self.face_mesh = self.mp_face_mesh.FaceMesh(
-                max_num_faces=1,
-                refine_landmarks=True,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5,
+        self.mp_drawing = None
+        self.drawing_spec = None
+
+        if hasattr(mp, "solutions") and hasattr(mp.solutions, "face_mesh"):
+            self.mp_face_mesh = mp.solutions.face_mesh
+            self.mp_drawing = mp.solutions.drawing_utils
+            self.drawing_spec = self.mp_drawing.DrawingSpec(
+                thickness=1, circle_radius=1, color=(0, 255, 0)
             )
-        except Exception as exc:
-            app_logger.warning("Face mesh init failed: %s", exc)
+            try:
+                self.face_mesh = self.mp_face_mesh.FaceMesh(
+                    max_num_faces=1,
+                    refine_landmarks=True,
+                    min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5,
+                )
+            except Exception as exc:
+                app_logger.warning("Face mesh init failed: %s", exc)
+        else:
+            app_logger.warning(
+                "MediaPipe solutions API unavailable; focus detection disabled"
+            )
 
         self.unfocused_counter = 0
         self.VISUAL_WARNING_THRESHOLD_FRAMES = 15
@@ -258,6 +277,12 @@ class PomodoroTimer:
         )
         self.collab_polling_active = False
         self.accountability_enabled = ctk.BooleanVar(value=False)
+        self.bluetooth_enabled = ctk.BooleanVar(value=False)
+        self.bluetooth_bridge = None
+        self.last_bluetooth_poll = 0.0
+
+        if BLUETOOTH_MODULE_AVAILABLE:
+            self.bluetooth_bridge = BluetoothAccountabilityBridge(app_logger)
 
         self.report_manager = None
         self.reports_enabled = ctk.BooleanVar(value=False)
@@ -306,6 +331,49 @@ class PomodoroTimer:
             command=self.on_accountability_toggle,
         )
         accountability_toggle.pack(anchor="w", pady=(0, 5))
+
+        bluetooth_toggle = ctk.CTkCheckBox(
+            accountability_frame,
+            text="Enable Bluetooth add-on",
+            variable=self.bluetooth_enabled,
+            command=self.on_bluetooth_toggle,
+        )
+        bluetooth_toggle.pack(anchor="w", pady=(0, 5))
+
+        bluetooth_frame = ctk.CTkFrame(accountability_frame, fg_color="transparent")
+        bluetooth_frame.pack(fill="x", pady=(0, 5))
+
+        self.bluetooth_address_entry = ctk.CTkEntry(
+            bluetooth_frame,
+            placeholder_text="Bluetooth MAC (e.g. 00:11:22:33:44:55)",
+            height=28,
+            width=200,
+        )
+        self.bluetooth_address_entry.pack(side="left", padx=(0, 6))
+
+        bluetooth_host_button = ctk.CTkButton(
+            bluetooth_frame,
+            text="BT Host",
+            command=self.start_bluetooth_host,
+            width=78,
+        )
+        bluetooth_host_button.pack(side="left", padx=(0, 6))
+
+        bluetooth_connect_button = ctk.CTkButton(
+            bluetooth_frame,
+            text="BT Connect",
+            command=self.connect_bluetooth_peer,
+            width=88,
+        )
+        bluetooth_connect_button.pack(side="left")
+
+        self.bluetooth_status_label = ctk.CTkLabel(
+            accountability_frame,
+            text="Bluetooth: Disabled",
+            font=("Helvetica", 11),
+            text_color="#CCCCCC",
+        )
+        self.bluetooth_status_label.pack(anchor="w", pady=(0, 4))
 
         code_frame = ctk.CTkFrame(accountability_frame, fg_color="transparent")
         code_frame.pack(fill="x", pady=(0, 5))
@@ -376,8 +444,12 @@ class PomodoroTimer:
             self.code_entry,
             create_button,
             join_button,
+            self.bluetooth_address_entry,
+            bluetooth_host_button,
+            bluetooth_connect_button,
         ]
         self.set_accountability_enabled(self.accountability_enabled.get())
+        self.set_bluetooth_enabled(self.bluetooth_enabled.get())
 
         reports_frame = ctk.CTkFrame(right_frame)
         reports_frame.pack(pady=5, fill="x", padx=10)
@@ -489,7 +561,7 @@ class PomodoroTimer:
             self.goal_entry.delete(0, "end")
             self.update_goals_display()
             if self.is_accountability_enabled():
-                self.collab_session.publish_event(
+                self.broadcast_accountability_event(
                     "goals_update",
                     {"goals": self.goals},
                 )
@@ -530,7 +602,7 @@ class PomodoroTimer:
             self.goals.pop(index)
             self.update_goals_display()
             if self.is_accountability_enabled():
-                self.collab_session.publish_event(
+                self.broadcast_accountability_event(
                     "goals_update",
                     {"goals": self.goals},
                 )
@@ -685,14 +757,107 @@ class PomodoroTimer:
             self.collab_event_label.configure(text="")
             self.update_partner_goals([])
             self.update_collab_status("Accountability: Disabled")
+            self.set_bluetooth_enabled(False)
         else:
             self.update_collab_status("Accountability: Not connected")
+            self.set_bluetooth_enabled(self.bluetooth_enabled.get())
 
         for control in self.collab_controls:
             control.configure(state="normal" if enabled else "disabled")
 
     def is_accountability_enabled(self):
         return bool(self.accountability_enabled.get())
+
+    def on_bluetooth_toggle(self):
+        self.set_bluetooth_enabled(self.bluetooth_enabled.get())
+
+    def set_bluetooth_enabled(self, enabled: bool):
+        if not self.is_accountability_enabled():
+            enabled = False
+            self.bluetooth_enabled.set(False)
+
+        if enabled:
+            if not BLUETOOTH_MODULE_AVAILABLE or self.bluetooth_bridge is None:
+                self.bluetooth_enabled.set(False)
+                self.update_bluetooth_status(
+                    "Bluetooth: Module unavailable", state="error"
+                )
+                return
+            if not self.bluetooth_bridge.is_supported():
+                self.bluetooth_enabled.set(False)
+                self.update_bluetooth_status("Bluetooth: Not supported", state="error")
+                return
+            if self.bluetooth_bridge.is_connected():
+                self.update_bluetooth_status("Bluetooth: Connected", state="connected")
+            elif self.bluetooth_bridge.is_waiting():
+                self.update_bluetooth_status(
+                    "Bluetooth: Waiting for peer", state="neutral"
+                )
+            else:
+                self.update_bluetooth_status("Bluetooth: Ready", state="neutral")
+        else:
+            self.stop_bluetooth_bridge()
+            self.update_bluetooth_status("Bluetooth: Disabled", state="neutral")
+
+    def is_bluetooth_enabled(self) -> bool:
+        return bool(self.bluetooth_enabled.get())
+
+    def update_bluetooth_status(self, text, state="neutral"):
+        if state == "connected":
+            color = "#00FF00"
+        elif state == "error":
+            color = COLOR_WARN
+        else:
+            color = "#CCCCCC"
+        self.bluetooth_status_label.configure(text=text, text_color=color)
+
+    def start_bluetooth_host(self):
+        if not self.is_accountability_enabled() or not self.is_bluetooth_enabled():
+            return
+        if self.bluetooth_bridge is None:
+            self.update_bluetooth_status("Bluetooth: Module unavailable", state="error")
+            return
+
+        started = self.bluetooth_bridge.start_host(channel=BLUETOOTH_RFCOMM_CHANNEL)
+        if started:
+            self.update_bluetooth_status("Bluetooth: Hosting (waiting for peer)")
+            self.start_collab_polling()
+        else:
+            self.update_bluetooth_status("Bluetooth: Host start failed", state="error")
+
+    def connect_bluetooth_peer(self):
+        if not self.is_accountability_enabled() or not self.is_bluetooth_enabled():
+            return
+        if self.bluetooth_bridge is None:
+            self.update_bluetooth_status("Bluetooth: Module unavailable", state="error")
+            return
+
+        address = self.bluetooth_address_entry.get().strip()
+        if not address:
+            self.update_bluetooth_status(
+                "Bluetooth: Missing MAC address", state="error"
+            )
+            return
+
+        connected = self.bluetooth_bridge.connect(
+            address=address,
+            channel=BLUETOOTH_RFCOMM_CHANNEL,
+        )
+        if connected:
+            self.update_bluetooth_status("Bluetooth: Connected", state="connected")
+            self.start_collab_polling()
+        else:
+            self.update_bluetooth_status("Bluetooth: Connection failed", state="error")
+
+    def stop_bluetooth_bridge(self):
+        if self.bluetooth_bridge is not None:
+            self.bluetooth_bridge.stop()
+
+    def broadcast_accountability_event(self, event_type, payload):
+        sent_any = self.collab_session.publish_event(event_type, payload)
+        if self.is_bluetooth_enabled() and self.bluetooth_bridge is not None:
+            sent_any = self.bluetooth_bridge.send_event(event_type, payload) or sent_any
+        return sent_any
 
     def update_partner_goals(self, goals):
         self.partner_goals_display.configure(state="normal")
@@ -837,6 +1002,31 @@ class PomodoroTimer:
                 continue
             try:
                 events = self.collab_session.poll_events(timeout=1.0)
+                now = time.time()
+                if (
+                    self.is_bluetooth_enabled()
+                    and self.bluetooth_bridge is not None
+                    and now - self.last_bluetooth_poll
+                    >= BLUETOOTH_POLL_INTERVAL_MS / 1000.0
+                ):
+                    self.last_bluetooth_poll = now
+                    events.extend(self.bluetooth_bridge.poll_events())
+
+                    if self.bluetooth_bridge.is_connected():
+                        self.root.after(
+                            0,
+                            lambda: self.update_bluetooth_status(
+                                "Bluetooth: Connected", state="connected"
+                            ),
+                        )
+                    elif self.bluetooth_bridge.is_waiting():
+                        self.root.after(
+                            0,
+                            lambda: self.update_bluetooth_status(
+                                "Bluetooth: Hosting (waiting for peer)",
+                                state="neutral",
+                            ),
+                        )
                 if events:
                     # Schedule GUI update on main thread
                     self.root.after(
@@ -913,6 +1103,7 @@ class PomodoroTimer:
         if hasattr(self, "collab_polling_thread") and self.collab_polling_thread:
             self.collab_polling_thread.join(timeout=2.0)
         self.collab_session.disconnect()
+        self.stop_bluetooth_bridge()
         if self.is_accountability_enabled():
             self.update_collab_status("Accountability: Not connected")
 
@@ -941,11 +1132,11 @@ class PomodoroTimer:
                     self.session_goals = self.goals.copy()
                     self.start_camera()
                     if self.is_accountability_enabled():
-                        self.collab_session.publish_event(
+                        self.broadcast_accountability_event(
                             "work_started",
                             {"session_type": self.current_session_type},
                         )
-                        self.collab_session.publish_event(
+                        self.broadcast_accountability_event(
                             "session_goals",
                             {"goals": self.session_goals},
                         )
@@ -1002,7 +1193,7 @@ class PomodoroTimer:
                 print(f"AI adjusted next focus session to: {next_focus_time} minutes.")
 
                 if self.is_accountability_enabled():
-                    self.collab_session.publish_event(
+                    self.broadcast_accountability_event(
                         "work_completed",
                         {"distractions": self.current_session_distractions},
                     )
@@ -1130,7 +1321,7 @@ class PomodoroTimer:
                                 )
                             )
                             if self.is_accountability_enabled():
-                                self.collab_session.publish_event(
+                                self.broadcast_accountability_event(
                                     "distraction",
                                     {
                                         "reason": unfocused_reason,

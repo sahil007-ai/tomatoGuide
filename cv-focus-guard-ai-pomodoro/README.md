@@ -50,6 +50,12 @@ Using your webcam, Focus Guard continuously analyzes your head pose and eye stat
 - **Distraction Counter**: Track focus lapses per session
 - **Responsive Controls**: Pause, resume, and reset functionality
 
+### Accountability & Connectivity
+
+- **File-based Accountability**: Existing shared-folder session flow remains unchanged
+- **Bluetooth Add-on (Optional)**: RFCOMM host/connect channel for nearby device pairing
+- **Dual Transport**: Bluetooth can run in parallel with existing collaboration transport
+
 ---
 
 ## 🛠 Built With
@@ -154,7 +160,22 @@ SOUND_ALERT_THRESHOLD_FRAMES = 45
 
 # Algorithm constraints
 AI_MAX_CHANGE_PERCENT = 0.25  # ±25% max change per session
+
+# Optional Bluetooth add-on
+BLUETOOTH_RFCOMM_CHANNEL = 4
 ```
+
+### Optional Bluetooth Accountability Add-on
+
+1. Enable `Accountability` in the app.
+2. Enable `Bluetooth add-on`.
+3. On one device: click `BT Host`.
+4. On the other device: enter host Bluetooth MAC and click `BT Connect`.
+
+Notes:
+
+- Bluetooth is additive and does **not** replace file-based collaboration.
+- If your system doesn't expose RFCOMM Bluetooth sockets, the app keeps working without Bluetooth.
 
 ### Features Explained
 

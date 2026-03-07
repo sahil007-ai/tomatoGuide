@@ -151,6 +151,10 @@ FONT_BUTTON = ("Helvetica", 12)
 COLLAB_CODE_LENGTH = 6
 COLLAB_POLL_INTERVAL_MS = 2000
 
+# Optional Bluetooth accountability transport (RFCOMM)
+BLUETOOTH_RFCOMM_CHANNEL = 4
+BLUETOOTH_POLL_INTERVAL_MS = 500
+
 # ============================================================================
 # ALGORITHM SETTINGS
 # ============================================================================
